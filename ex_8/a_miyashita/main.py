@@ -1,6 +1,6 @@
 import argparse
 import sys
-from numpy import random
+import time
 
 from sklearn.metrics import confusion_matrix
 import numpy as np
@@ -162,7 +162,7 @@ class Hmm:
             plaus = np.sum(np.log(c)*y_oh[:,:,np.newaxis])
             # px = np.sum(alpha[:,:,:,-1],axis=1)
             # plaus = np.sum(np.log(px)*y_oh)
-            if plaus - prev < 1e-3:
+            if plaus - prev < 1e-6*self.n:
                 if plaus < prev:
                     sys.exit("Hmm.fit:plausibility decreased")
                 break
@@ -309,10 +309,16 @@ def main():
     # cm = confusion_matrix(z.ravel(),zpred.ravel(),labels=labels)
     # print(cm)
 
+    start = time.time()
     model = Hmm(pi=pi[:,:,0],a=a,b=b)
     model.fit(output,answer)
+    print(time.time()-start)
 
-    # print(a-model.a)
+    pred = model.predict(output)
+
+    labels = np.arange(model.n)
+    cm = confusion_matrix(answer,pred,labels=labels)
+    print(cm)
 
 if __name__=="__main__":
     main()
