@@ -45,13 +45,13 @@ class Hmm:
 
     def forward(self, x, scaling=False):
         # (n,k,samples,t)
-        p = self.b[:,:,x]
+        pout = self.b[:,:,x]
         # (n,k,samples,t)
         alpha = np.zeros((self.n,self.k)+x.shape)
         # (n,samples,t)
         c = np.zeros((self.n,)+x.shape)
         # (n,k,samples)<-(n,k,samples)*(n,k,1)
-        alpha[:,:,:,0] = p[:,:,:,0]*self.pi[:,:,np.newaxis]
+        alpha[:,:,:,0] = pout[:,:,:,0]*self.pi[:,:,np.newaxis]
 
         if scaling:
             c[:,:,0] = np.sum(alpha[:,:,:,0],axis=1)
@@ -64,7 +64,7 @@ class Hmm:
             # (n,k',samples)<-(n,k,k',samples)
             ave = np.sum(ave, axis=1)
             # (n,k',samples)<-(n,k',samples)*(n,k',samples)
-            alpha[:,:,:,t] = p[:,:,:,t]*ave
+            alpha[:,:,:,t] = pout[:,:,:,t]*ave
 
             if scaling:
                 c[:,:,t] = np.sum(alpha[:,:,:,t],axis=1)
@@ -74,7 +74,7 @@ class Hmm:
 
     def backward(self, x, c=None):
         # (n,k,samples,t)
-        p = self.b[:,:,x]
+        pout = self.b[:,:,x]
         # (n,k,samples,t)
         beta = np.zeros((self.n,self.k)+x.shape)
         # (n,k,samples)<-()
@@ -83,7 +83,7 @@ class Hmm:
             # (n,k,k',samples)<-(n,k,k',1)*(n,1,k',samples)
             ave = self.a[:,:,:,np.newaxis]*beta[:,np.newaxis,:,:,t+1]
             # (n,k,k',samples)<-(n,1,k',samples)*(n,k,k',samples)
-            ave = p[:,np.newaxis,:,:,t+1]*ave
+            ave = pout[:,np.newaxis,:,:,t+1]*ave
             # (n,k,samples)<-(n,k,k',samples)
             beta[:,:,:,t] = np.sum(ave, axis=2)
 
@@ -135,8 +135,6 @@ class Hmm:
         return lpmax, zmax
 
     def fit(self, x, y):
-        # (n,k,samples,t)
-        p = self.b[:,:,x]
         # (m,samples,t)
         x_oh = np.eye(self.m)[:,x]
         # (n,samples)
@@ -154,7 +152,7 @@ class Hmm:
         prev = -np.inf
         lp = np.array([])
         
-        for i in range(10000):
+        while 1:
             # E step
             # (n,k,samples,t),(n,samples,t)
             alpha,c = self.forward(x,scaling=True)
@@ -164,11 +162,16 @@ class Hmm:
             plaus = np.sum(np.log(c)*y_oh[:,:,np.newaxis])
             # px = np.sum(alpha[:,:,:,-1],axis=1)
             # plaus = np.sum(np.log(px)*y_oh)
-            if plaus - prev < 1e-10 and plaus - prev > 0:
+            if plaus - prev < 1e-3:
+                if plaus < prev:
+                    sys.exit("Hmm.fit:plausibility decreased")
                 break
             prev = plaus
             lp = np.append(lp,plaus)
 
+            # (n,k,samples,t)
+            pout = self.b[:,:,x]
+        
             # (n,k,samples,t)
             beta = self.backward(x,c)
             # beta = self.backward(x)
@@ -178,7 +181,7 @@ class Hmm:
             # (n,k,k',samples,t)<-(n,k,1,samples,t)*(n,1,k',samples,t)
             xi = alpha[:,:,np.newaxis,:,:-1]*beta[:,np.newaxis,:,:,1:]
             # (n,k,k',samples,t)<-(n,k,k',samples,t)*(n,k,k',1,1)*(n,1,k',samples,t)
-            xi *= self.a[:,:,:,np.newaxis,np.newaxis]*p[:,np.newaxis,:,:,1:]
+            xi *= self.a[:,:,:,np.newaxis,np.newaxis]*pout[:,np.newaxis,:,:,1:]
             # (n,k,k',samples,t)<-(n,k,k',samples,t)/(n,1,1,samples,t)
             xi /= c[:,np.newaxis,np.newaxis,:,1:]
             # xi /= px[:,np.newaxis,np.newaxis,:,np.newaxis]
@@ -295,7 +298,7 @@ def main():
     labels = np.arange(model.n)
     cm = confusion_matrix(answer,pred,labels=labels)
     print(cm)
-
+    
     model = Hmm(pi=pi[0:1,:,0],a=a[0:1],b=b[0:1])
     x,z = model.sampling(100,50)
     lpxz,zpred = model.viterbi(x[0])
@@ -306,8 +309,8 @@ def main():
     # cm = confusion_matrix(z.ravel(),zpred.ravel(),labels=labels)
     # print(cm)
 
-    # model = Hmm(pi=pi[0:1,:,0],a=a[0:1],b=b[0:1])
-    # model.fit(output[answer==0],answer[answer==0])
+    model = Hmm(pi=pi[:,:,0],a=a,b=b)
+    model.fit(output,answer)
 
     # print(a-model.a)
 
