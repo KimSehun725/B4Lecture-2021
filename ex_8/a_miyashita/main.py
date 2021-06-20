@@ -2,6 +2,7 @@ import argparse
 import sys
 import time
 
+from sklearn.metrics import accuracy_score
 from sklearn.metrics import confusion_matrix
 import numpy as np
 import pickle
@@ -11,25 +12,34 @@ import seaborn as sns
 
 class Hmm:
     def __init__(self, k=None, m=None, pi=None, a=None, b=None):
+        """
+            Class for HMM.
+            # Args
+                k (int): number of status of latent variable
+                m (int): number of status of output variable
+                pi (ndarray, shape=(k,)): initial probability
+                a (ndarray, shape=(k,k)): transition probability
+                b (ndarray, shape=(k,m)): output probability
+        """
         if pi is None:
             if k is None:
-                sys.exit("Hmm.__init__:the number of status is required")
+                sys.exit("Hmm.__init__:k is required")
             self.pi = np.zeros(k)
         else:
             self.pi = pi
         
         if a is None:
             if k is None:
-                sys.exit("Hmm.__init__:the number of status is required")
+                sys.exit("Hmm.__init__:k is required")
             self.a = np.zeros((k,k))
         else:
             self.a = a
 
         if b is None:
             if k is None:
-                sys.exit("Hmm.__init__:the number of status is required")
+                sys.exit("Hmm.__init__:k is required")
             if m is None:
-                sys.exit("Hmm.__init__:the number of outputs is required")
+                sys.exit("Hmm.__init__:m is required")
             self.b = np.zeros((k,m))
         else:
             self.b = b
@@ -38,6 +48,17 @@ class Hmm:
         self.m = self.b.shape[1]
 
     def forward(self, x, scaling=False):
+        """
+            Calculate p(X^t,z_t) by forward algorithm.
+            # Args
+                x (ndarray, axis=(samples,t)): output labels
+                scaling (bool, default=False): 
+                    If scaling is True, this function return p(z_t|X^t) instead of p(X^t,z_t).
+                    then the scaling coefficent is returned as c.
+            # Returns
+                alpha (ndarray, axis=(k,samples,t)): p(X^t,z_t) (or p(z_t|X^t))
+                c (ndarray, axis=(samples,t)): scaling coefficent
+        """
         # (k,samples,t)
         pout = self.b[:,x]
         # (k,samples,t)
@@ -70,6 +91,15 @@ class Hmm:
         return alpha, c
 
     def backward(self, x, c=None):
+        """
+            Calculate p(x_{t+1},...,x_{n}|z_t) by backward algorithm.
+            # Args
+                x (ndarray, axis=(samples,t)): output labels
+                c (ndarray, axis=(samples,t)):
+                    If c is given, output beta is scaled by c.
+            # Returns
+                beta (ndarray, axis=(k,samples,t)): (scaled) p(x_{t+1},...,x_{n}|z_t)
+        """
         # (k,samples,t)
         pout = self.b[:,x]
         # (k,samples,t)
@@ -90,16 +120,29 @@ class Hmm:
 
         return beta
 
-    def viterbi(self, x):
-        samples = x.shape[0]
+    def viterbi(self, x, condition=False):
+        """
+            Calculate the most plausible latent variables by viterbi algorithm.
+            # Args
+                x (ndarray, axis=(samples,t)): output labels
+                condition (bool, default=False):
+                    If condition is True, it is assumed that all output labels are sampled 
+                    from the distribution conditioned by same latent variables.
+            # Returns
+                lpmax (ndarray, axis=(samples,)): max log plausibility
+                zmax (ndarray, axis=(samples,t)): the most plausible latent variables
+        """
+        samples = 1 if condition else x.shape[0]
         time = x.shape[1]
         
         # (k,samples,t)
         lp = np.log(self.b[:,x])
+        if condition:
+            lp = np.sum(lp,axis=1,keepdims=True)
         # (k,K',1)
         la = np.log(self.a[:,:,np.newaxis])
         # (k,samples,t)
-        w = np.zeros((self.k,)+x.shape,dtype=np.int)
+        w = np.zeros((self.k,samples,time),dtype=np.int)
         # (k,samples)<-(k,samples)*(k,1)
         nu = lp[:,:,0]+np.log(self.pi[:,np.newaxis])
         # (k,samples)<-(k,1)
@@ -131,6 +174,12 @@ class Hmm:
         return lpmax, zmax
 
     def fit(self, x, y=None):
+        """
+            Fit parameters by EM algorithm.
+            # Args
+                x (ndarray, axis=(samples,t)): output labels
+                y: dummy
+        """
         # (m,samples,t)
         x_oh = np.eye(self.m)[:,x]
         
@@ -192,14 +241,41 @@ class Hmm:
         # plt.plot(lp)
         # plt.show()
     
-    def predict(self, x):
-        alpha, c = self.forward(x, scaling=True)
-        # (samples)<-(samples,t)
-        lpx = np.sum(np.log(c),axis=1)
+    def predict(self, x, scaling=False):
+        """
+            Calculate log(p(X)).
+            # Args
+                x (ndarray, axis=(samples,t)): output labels
+                scaling (bool, default=False):
+                    If scaling is True, scaling forward algorithm is used.
+            # Returns 
+                lpx (ndarray, axis=(samples,)): log(p(X))
+        """
+        if scaling:
+            alpha, c = self.forward(x, scaling=True)
+            # (samples)<-(samples,t)
+            lpx = np.sum(np.log(c),axis=1)
+        else:
+            alpha, c = self.forward(x, scaling=False)
+            # (samples)<-(k,samples)
+            px = np.sum(alpha[:,:,-1],axis=0)
+            lpx = np.log(px)
         
         return lpx
 
-    def sampling(self, samples, time):
+    def sampling(self, samples, time, condition=False):
+        """
+            Sample data from HMM.
+            # Args 
+                samples (int): sample size
+                time (int): size of series
+                condition (bool, default=False):
+                    If condition is True, all output labels sample are sampled 
+                    from the distribution conditioned by same latent labels.
+            # Returns
+                x (ndarray, axis=(samples,t)): output labels
+                z (ndarray, axis=(samples,t)): latent labels
+        """
         x = np.zeros((samples,time),dtype=np.int)
         z = np.zeros((samples,time),dtype=np.int)
         s = np.zeros((samples,self.k),dtype=np.int)
@@ -211,8 +287,12 @@ class Hmm:
         labels = np.random.choice(status,size=samples,p=self.pi)
         for j in range(self.k):
             s[:,j] = np.random.choice(outputs,size=samples,p=self.b[j])
-        x[idx,0] = s[idx,labels]
-        z[:,0] = labels
+        if condition:
+            x[:,0] = s[:,labels[0]]
+            z[:,0] = labels[0]
+        else:
+            x[idx,0] = s[idx,labels]
+            z[:,0] = labels
 
         for t in range(1,time):
             for j in range(self.k):
@@ -220,12 +300,24 @@ class Hmm:
             labels = s[idx,labels]
             for j in range(self.k):
                 s[:,j] = np.random.choice(outputs,size=samples,p=self.b[j])
-            x[idx,t] = s[idx,labels]
-            z[:,t] = labels
+            if condition:
+                x[:,t] = s[:,labels[0]]
+                z[:,t] = labels[0]
+            else:
+                x[idx,t] = s[idx,labels]
+                z[:,t] = labels
         
         return x, z
 
     def log_plaus(self, x, z):
+        """
+            Calculate log(p(X,Z)).
+            # Args
+                x (ndarray, axis=(samples,t)): output labels
+                z (ndarray, axis=(samples,t)): latent labels
+            # Returns 
+                lpx (ndarray, axis=(samples,)): log(p(X,Z))
+        """
         # (samples)
         pini = self.pi[z[:,0]]
         # (samples,t-1)
@@ -245,7 +337,7 @@ def main():
     parser = argparse.ArgumentParser(description="HMM classification or etc")
     parser.add_argument('sc', type=str, help="input filename followed by extension .pickle")
     parser.add_argument('-v', '--viterbi', type=int, nargs=2, help="sampling size for viterbi (samplesize,seriessize)")
-    parser.add_argument('-t', '--train', action='store_true', help="train HMM model")
+    parser.add_argument('-t', '--train',  type=int, nargs=2, help="sampling size for fit (samplesize,seriessize)")
     args = parser.parse_args()
 
     print(f">>> data = pickle.load(open({args.sc}.pickle, 'rb'))")
@@ -274,14 +366,16 @@ def main():
     for i in range(modelsize):
         models.append(Hmm(pi=pi[i,:,0],a=a[i],b=b[i]))
 
+    # predict by forward
     lps = np.zeros((modelsize,samplesize))
     for i in range(modelsize):
-        lps[i] = models[i].predict(output)
+        lps[i] = models[i].predict(output, scaling=True)
     
     pred = np.argmax(lps,axis=0)
     labels = np.arange(modelsize)
     cm1 = confusion_matrix(answer,pred,labels=labels)
 
+    # predict by viterbi
     lps = np.zeros((modelsize,samplesize))
     for i in range(modelsize):
         lps[i],_ = models[i].viterbi(output)
@@ -300,32 +394,49 @@ def main():
     ax[1].set(title=f"{args.sc} Viterbi", xlabel="Predicted model", ylabel="Answer model")
     plt.show()
     
+    # calculate the most plausible latent labels
     if args.viterbi:
         model = Hmm(pi=pi[0,:,0],a=a[0],b=b[0])
-        x,z = model.sampling(args.viterbi[0],args.viterbi[1])
-        lpxzpred,zpred = model.viterbi(x)
-        lpxz = model.log_plaus(x,z)
-        lpxzpred = model.log_plaus(x,zpred)
-        if np.any(lpxz>lpxzpred):
-            print("zpred is not maximum")
-                
+        x,z = model.sampling(args.viterbi[0],args.viterbi[1],condition=True)
+        lpxzpred,zpred = model.viterbi(x,condition=True)
+            
         labels = np.arange(model.k)
-        cm = confusion_matrix(z.ravel(),zpred.ravel(),labels=labels)
+        cm = confusion_matrix(z[0].ravel(),zpred.ravel(),labels=labels)
         sns.heatmap(cm, annot=True, cmap='Greys')
         plt.title(f"{args.sc} viterbi")
         plt.xlabel("Predicted status")
         plt.ylabel("Answer status")
         plt.show()
+        """
+        tries = 100
+        acc = np.zeros((args.viterbi[0]-1,tries))
+        for i in range(1, args.viterbi[0]):
+            for j in range(tries):
+                x,z = model.sampling(i,args.viterbi[1],condition=True)
+                lpxzpred,zpred = model.viterbi(x,condition=True)
+                acc[i-1,j] = accuracy_score(z[0].ravel(),zpred.ravel())
+        plt.plot(np.mean(acc,axis=1))
+        plt.title("viterbi accuracy")
+        plt.xlabel("sample size")
+        plt.ylabel("accuracy")
+        plt.show()
+        """
     
+    # train models
     if args.train:
+        models_train = []
+        for i in range(modelsize):
+            models_train.append(Hmm(pi=pi[i,:,0],a=a[i],b=b[i]))
+
         start = time.time()
         for i in range(modelsize):
-            models[i].fit(output[answer==i])
+            train,_ = models[i].sampling(args.train[0],args.train[1])
+            models_train[i].fit(train,ltr=False)
         print(time.time()-start)
 
         lps = np.zeros((modelsize,samplesize))
         for i in range(modelsize):
-            lps[i] = models[i].predict(output)
+            lps[i] = models_train[i].predict(output, scaling=True)
         
         pred = np.argmax(lps,axis=0)
         labels = np.arange(modelsize)
