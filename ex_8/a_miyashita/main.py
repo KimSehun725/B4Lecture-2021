@@ -6,6 +6,7 @@ from sklearn.metrics import confusion_matrix
 import numpy as np
 import pickle
 from matplotlib import pyplot as plt
+import seaborn as sns
 
 
 class Hmm:
@@ -149,12 +150,9 @@ class Hmm:
             # E step
             # (k,samples,t),(samples,t)
             alpha,c = self.forward(x,scaling=True)
-            # alpha,c = self.forward(x)
 
             # check
             plaus = np.sum(np.log(c))
-            # px = np.sum(alpha[:,:,:,-1],axis=1)
-            # plaus = np.sum(np.log(px)*y_oh)
             if plaus - prev < 1e-6:
                 if plaus < prev:
                     sys.exit("Hmm.fit:plausibility decreased")
@@ -167,17 +165,14 @@ class Hmm:
         
             # (k,samples,t)
             beta = self.backward(x,c)
-            # beta = self.backward(x)
             # (k,samples,t)<-(k,samples,t)*(k,samples,t)
             gamma = alpha*beta
-            # gamma = alpha*beta/px[:,np.newaxis,:,np.newaxis]
             # (k,k',samples,t)<-(k,1,samples,t)*(1,k',samples,t)
             xi = alpha[:,np.newaxis,:,:-1]*beta[:,:,1:]
             # (k,k',samples,t)<-(k,k',samples,t)*(k,k',1,1)*(1,k',samples,t)
             xi *= self.a[:,:,np.newaxis,np.newaxis]*pout[:,:,1:]
             # (k,k',samples,t)<-(k,k',samples,t)/(1,1,samples,t)
             xi /= c[:,1:]
-            # xi /= px[:,np.newaxis,np.newaxis,:,np.newaxis]
 
             # M step
             # (k,)<-(k,sample)
@@ -198,14 +193,6 @@ class Hmm:
         # plt.show()
     
     def predict(self, x):
-        """
-        alpha, c = self.forward(x)
-        beta = self.backward(x)
-        # (n,samples)<-(n,k,samples)
-        px = np.sum(alpha[:,:,:,0]*beta[:,:,:,0],axis=1)
-        
-        return np.argmax(px,axis=0)
-        """
         alpha, c = self.forward(x, scaling=True)
         # (samples)<-(samples,t)
         lpx = np.sum(np.log(c),axis=1)
@@ -255,12 +242,14 @@ class Hmm:
 
 def main():
     # process args
-    parser = argparse.ArgumentParser(description="")
-    parser.add_argument("sc", type=str, help="input filename with extension .pickle")
+    parser = argparse.ArgumentParser(description="HMM classification or etc")
+    parser.add_argument('sc', type=str, help="input filename followed by extension .pickle")
+    parser.add_argument('-v', '--viterbi', type=int, nargs=2, help="sampling size for viterbi (samplesize,seriessize)")
+    parser.add_argument('-t', '--train', action='store_true', help="train HMM model")
     args = parser.parse_args()
 
-    print(f">>> data = pickle.load(open({args.sc}, 'rb'))")
-    data = pickle.load(open(args.sc, 'rb'))
+    print(f">>> data = pickle.load(open({args.sc}.pickle, 'rb'))")
+    data = pickle.load(open(f"{args.sc}.pickle", 'rb'))
     print(">>> print(data['answer_models'].shape)")
     print(data['answer_models'].shape)
     print(">>> print(np.array(data['output']).shape)")
@@ -291,31 +280,61 @@ def main():
     
     pred = np.argmax(lps,axis=0)
     labels = np.arange(modelsize)
-    cm = confusion_matrix(answer,pred,labels=labels)
-    print(cm)
-    
-    model = Hmm(pi=pi[0,:,0],a=a[0],b=b[0])
-    x,z = model.sampling(50,100)
-    lpxzpred,zpred = model.viterbi(x)
-    lpxz = model.log_plaus(x,z)
-    print(lpxz<=lpxzpred)
-    labels = np.arange(model.k)
-    cm = confusion_matrix(z.ravel(),zpred.ravel(),labels=labels)
-    print(cm)
-    
-    start = time.time()
-    for i in range(modelsize):
-        models[i].fit(output[answer==i])
-    print(time.time()-start)
+    cm1 = confusion_matrix(answer,pred,labels=labels)
 
     lps = np.zeros((modelsize,samplesize))
     for i in range(modelsize):
-        lps[i] = models[i].predict(output)
+        lps[i],_ = models[i].viterbi(output)
     
     pred = np.argmax(lps,axis=0)
     labels = np.arange(modelsize)
-    cm = confusion_matrix(answer,pred,labels=labels)
-    print(cm)
+    cm2 = confusion_matrix(answer,pred,labels=labels)
+
+    # plot
+    fig, ax = plt.subplots(1, 2)
+    fig.subplots_adjust(wspace=0.5)
+    
+    sns.heatmap(cm1, annot=True, cmap='Greys', ax=ax[0])
+    ax[0].set(title=f"{args.sc} Forward", xlabel="Predicted model", ylabel="Answer model")
+    sns.heatmap(cm2, annot=True, cmap='Greys', ax=ax[1])
+    ax[1].set(title=f"{args.sc} Viterbi", xlabel="Predicted model", ylabel="Answer model")
+    plt.show()
+    
+    if args.viterbi:
+        model = Hmm(pi=pi[0,:,0],a=a[0],b=b[0])
+        x,z = model.sampling(args.viterbi[0],args.viterbi[1])
+        lpxzpred,zpred = model.viterbi(x)
+        lpxz = model.log_plaus(x,z)
+        lpxzpred = model.log_plaus(x,zpred)
+        if np.any(lpxz>lpxzpred):
+            print("zpred is not maximum")
+                
+        labels = np.arange(model.k)
+        cm = confusion_matrix(z.ravel(),zpred.ravel(),labels=labels)
+        sns.heatmap(cm, annot=True, cmap='Greys')
+        plt.title(f"{args.sc} viterbi")
+        plt.xlabel("Predicted status")
+        plt.ylabel("Answer status")
+        plt.show()
+    
+    if args.train:
+        start = time.time()
+        for i in range(modelsize):
+            models[i].fit(output[answer==i])
+        print(time.time()-start)
+
+        lps = np.zeros((modelsize,samplesize))
+        for i in range(modelsize):
+            lps[i] = models[i].predict(output)
+        
+        pred = np.argmax(lps,axis=0)
+        labels = np.arange(modelsize)
+        cm = confusion_matrix(answer,pred,labels=labels)
+        sns.heatmap(cm, annot=True, cmap='Greys')
+        plt.title(f"{args.sc} trained model")
+        plt.xlabel("Predicted label")
+        plt.ylabel("Answer label")
+        plt.show()
     
 
 if __name__=="__main__":
