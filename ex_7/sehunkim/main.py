@@ -67,7 +67,8 @@ def plot2d_3D(data, K, pi, mu, sigma, iter, fig):
     ax.scatter3D(data_x, data_y, np.zeros_like(
         data_x), s=2, label='original data')
     ax.contour3D(X, Y, Z, 50)
-    ax.scatter(mu_x, mu_y, np.zeros_like(mu_x), s= 40, linewidths=3, c='r', marker = 'x',label='Calculated centroids')
+    ax.scatter(mu_x, mu_y, np.zeros_like(mu_x), s=40, linewidths=3,
+               c='r', marker='x', label='Calculated centroids')
     ax.set_xlabel('x')
     ax.set_ylabel('y')
     ax.set_zlabel('probability density')
@@ -76,6 +77,7 @@ def plot2d_3D(data, K, pi, mu, sigma, iter, fig):
     ax.view_init(azim=70, elev=40)
     fig.savefig(f"result_iter={iter}.png")
     plt.clf()
+
 
 def plot_likelihood(likelihood, filename):
     """
@@ -122,14 +124,14 @@ def make_gif(iter):
     for filename in set(filenames):
         os.remove(filename)
 
-
+"""
 def gauss(x, mean, cov):
     dim = x.shape[0]
     cov_inv = np.linalg.inv(cov)
     coef = 1 / ((2*np.pi) ** (dim / 2) * np.sqrt(np.linalg.det(cov)))
     gaussian = coef * np.exp(-((x-mean).T @ cov_inv @ (x-mean))/2)
     return gaussian
-
+"""
 
 def em_algo(x, K, D, mu, sigma, pi):
     q = np.zeros([x.shape[0], K])
@@ -182,10 +184,9 @@ def gmm_classification(x, K, D, max_iter):
             plot1d(x, K, pi, mu, sigma, i)
         elif D == 2:
             plot2d_3D(x, K, pi, mu, sigma, i, fig)
-    print(i)
+
     make_gif(i)
 
-    
     return pi, mu, sigma, likelihood
 
 
@@ -204,6 +205,7 @@ def main():
     max_iter = args.max_iter
     pi, mu, sigma, likelihood = gmm_classification(data, K, dim, max_iter)
     plot_likelihood(likelihood, args.filename)
+
 
 if __name__ == "__main__":
     main()
