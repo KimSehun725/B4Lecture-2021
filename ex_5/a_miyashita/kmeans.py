@@ -124,6 +124,10 @@ def main():
 
     data = np.loadtxt(args.sc, delimiter=',', skiprows=1)
     
+    if data.ndim == 1:
+        data = data[:,np.newaxis]
+        data = np.concatenate([data, np.zeros_like(data)],axis=1)
+
     if args.lbg:
         means, labels = lbg(data, args.lbg)
 

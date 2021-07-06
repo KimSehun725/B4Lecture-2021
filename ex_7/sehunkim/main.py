@@ -78,7 +78,6 @@ def plot2d_3D(data, K, pi, mu, sigma, iter, fig):
     fig.savefig(f"result_iter={iter}.png")
     plt.clf()
 
-
 def plot_likelihood(likelihood, filename):
     """
     Function for plotting log likelihood
@@ -205,7 +204,6 @@ def main():
     max_iter = args.max_iter
     pi, mu, sigma, likelihood = gmm_classification(data, K, dim, max_iter)
     plot_likelihood(likelihood, args.filename)
-
 
 if __name__ == "__main__":
     main()
